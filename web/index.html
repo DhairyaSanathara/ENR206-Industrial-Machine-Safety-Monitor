@@ -1,0 +1,1403 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Machine Safety Monitor</title>
+<meta name="description" content="Live monitoring and control of an Arduino-based industrial machine safety system. ENR206 project, Ahmedabad University.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<script>
+  // theme before first paint (saved choice, else night mode)
+  try { const t = localStorage.getItem("msm-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (_) {}
+</script>
+<style>
+/* ============================================================== tokens
+   Colour is kept for machine state: the console stays grey while things are
+   normal, so amber and red stand out the moment something is wrong.        */
+:root {
+  --font: "Barlow", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --cond: "Barlow Semi Condensed", "Barlow", "Arial Narrow", "Segoe UI", system-ui, sans-serif;
+  --r-sm: 6px; --r-md: 10px;
+  --plate: #f2c200; --dome: #d91f26;
+}
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1f24; --panel: #222930; --panel-2: #2a3239; --inset: #1d2328;
+  --line: #343d45; --line-2: #45505a;
+  --ink: #e9edf0; --ink-2: #b9c3cb; --muted: #8b97a2;
+  --series: #5ea2ec; --series-2: #8b97a2; --meter: #7f8c97;
+  --good: #3dbb54; --good-ink: #6fd27f; --good-bg: rgba(61,187,84,.13);
+  --warn: #fab219; --warn-ink: #fcc64f; --warn-bg: rgba(250,178,25,.13);
+  --crit: #ef5350; --crit-ink: #ff8a87; --crit-bg: rgba(239,83,80,.15);
+  --grid: #2b333a; --axis: #4b5660; --focus: #8cc2ff;
+  --btn: #303941; --btn-hover: #38424b; --primary: #3f8fe6; --primary-ink: #fff;
+  --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 1px 2px rgba(0,0,0,.25);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #dde1e4; --panel: #f6f7f8; --panel-2: #eceff1; --inset: #e7eaed;
+  --line: #ccd2d7; --line-2: #b4bcc3;
+  --ink: #1a2128; --ink-2: #3a4651; --muted: #5d6974;
+  --series: #2a78d6; --series-2: #7a8691; --meter: #6c7883;
+  --good: #0ca30c; --good-ink: #087a0a; --good-bg: rgba(12,163,12,.10);
+  --warn: #fab219; --warn-ink: #8a5a00; --warn-bg: rgba(250,178,25,.18);
+  --crit: #d03b3b; --crit-ink: #b02020; --crit-bg: rgba(208,59,59,.11);
+  --grid: #e2e6e9; --axis: #a7b0b8; --focus: #1f6fd1;
+  --btn: #e3e7ea; --btn-hover: #d8dde1; --primary: #2a78d6; --primary-ink: #fff;
+  --shadow: 0 1px 2px rgba(20,30,40,.08);
+}
+
+/* ============================================================== base */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 15px/1.45 var(--font); font-variant-numeric: tabular-nums; }
+button, input { font: inherit; color: inherit; }
+a { color: var(--series); }
+h1, h2, h3 { margin: 0; font-family: var(--cond); font-weight: 600; letter-spacing: .005em; }
+h2 { font-size: 19px; }
+h3 { font-size: 16px; font-weight: 600; }
+p { margin: 0; }
+.wrap { max-width: 1520px; margin: 0 auto; padding: 0 20px; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+kbd { font: 600 11px var(--font); border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--ink-2); }
+.muted { color: var(--muted); }
+
+button { cursor: pointer; border: 1px solid var(--line-2); background: var(--btn); border-radius: var(--r-sm); padding: 8px 14px; font-weight: 500; min-height: 40px; }
+button:hover:not(:disabled) { background: var(--btn-hover); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); font-weight: 600; }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--primary); }
+button.quiet { background: transparent; border-color: transparent; color: var(--ink-2); padding: 6px 10px; min-height: 34px; }
+button.quiet:hover:not(:disabled) { background: var(--btn); }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow); }
+
+/* ============================================================== header */
+.top { border-bottom: 1px solid var(--line); background: var(--panel); }
+.top .wrap { display: grid; grid-template-columns: auto 1fr auto; gap: 28px; align-items: center; padding-top: 14px; padding-bottom: 14px; }
+.brand { display: flex; gap: 16px; align-items: center; min-width: 0; }
+.logo { height: 58px; width: auto; max-width: 150px; object-fit: contain; background: #fff; border-radius: 8px; padding: 6px 8px; flex: none; }
+.uni { font: 600 14px var(--font); color: var(--ink-2); }
+h1 { font-size: 30px; line-height: 1.08; font-weight: 700; }
+.course { color: var(--muted); font-size: 14px; margin-top: 2px; }
+.credits { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; align-content: center; justify-self: center; font-size: 14px; border-left: 1px solid var(--line); padding-left: 24px; }
+.credits dt { color: var(--muted); }
+.credits dd { margin: 0; color: var(--ink); font-weight: 500; }
+.credits .prof { font: 600 17px/1.2 var(--cond); }
+.live { display: grid; justify-items: end; gap: 6px; }
+.clock { text-align: right; line-height: 1.1; }
+.clock b { font: 600 26px var(--cond); letter-spacing: .01em; display: block; }
+.clock span { color: var(--muted); font-size: 13px; }
+.status-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.pill[data-s="live"] .dot { background: var(--good); box-shadow: 0 0 0 3px var(--good-bg); animation: blink 2s ease-in-out infinite; }
+.pill[data-s="demo"] .dot { background: var(--series); }
+.pill[data-s="off"] .dot { background: var(--crit); }
+.role { font-size: 13px; color: var(--muted); }
+@keyframes blink { 50% { opacity: .35; } }
+
+/* ============================================================== connect bar (no server) */
+.connect { margin-top: 16px; padding: 14px 18px; display: flex; gap: 14px 18px; align-items: center; flex-wrap: wrap; border-left: 4px solid var(--series); }
+.connect p { flex: 1 1 380px; color: var(--ink-2); }
+.connect code { background: var(--inset); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+.connect .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ============================================================== machine state (hero) */
+.state { margin-top: 16px; display: grid; grid-template-columns: 1fr auto; position: relative; overflow: hidden; }
+.state::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 8px; background: var(--line-2); }
+.state[data-level="good"]::before { background: var(--good); }
+.state[data-level="warn"]::before { background: var(--warn); }
+.state[data-level="crit"]::before { background: var(--crit); }
+.state[data-level="warn"] { background: linear-gradient(90deg, var(--warn-bg), transparent 55%), var(--panel); }
+.state[data-level="crit"] { background: linear-gradient(90deg, var(--crit-bg), transparent 55%), var(--panel); }
+.state-main { padding: 20px 24px 20px 32px; display: grid; gap: 14px; min-width: 0; }
+.state-head { display: flex; align-items: baseline; gap: 6px 16px; flex-wrap: wrap; }
+.lamp { width: 18px; height: 18px; border-radius: 50%; background: var(--line-2); align-self: center; flex: none; border: 2px solid rgba(0,0,0,.18); }
+.state[data-level="good"] .lamp { background: var(--good); box-shadow: 0 0 14px var(--good); }
+.state[data-level="warn"] .lamp { background: var(--warn); box-shadow: 0 0 16px var(--warn); animation: blink 1s steps(2, start) infinite; }
+.state[data-level="crit"] .lamp { background: var(--crit); box-shadow: 0 0 18px var(--crit); animation: blink .6s steps(2, start) infinite; }
+#stState { font: 700 46px/1 var(--cond); letter-spacing: -.005em; }
+.state[data-level="warn"] #stState { color: var(--warn-ink); }
+.state[data-level="crit"] #stState { color: var(--crit-ink); }
+#stFor { color: var(--muted); font-size: 15px; }
+#stWhy { font-size: 17px; color: var(--ink-2); max-width: 70ch; }
+
+.controls { display: flex; gap: 14px 22px; align-items: flex-end; flex-wrap: wrap; padding-top: 4px; }
+.controls .start { min-width: 150px; min-height: 48px; font-size: 17px; }
+.speed { display: grid; gap: 6px; flex: 1 1 360px; max-width: 560px; }
+.speed-top { display: flex; justify-content: space-between; align-items: baseline; }
+.speed-top label { color: var(--muted); font-size: 14px; }
+.speed-top output { font: 600 22px var(--cond); }
+.speed-row { display: flex; gap: 8px; align-items: center; }
+.speed-row button { min-width: 44px; padding: 6px 8px; }
+input[type=range] { flex: 1; accent-color: var(--primary); height: 28px; min-width: 120px; }
+.presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.presets button { min-height: 34px; padding: 4px 12px; font-size: 14px; }
+.aux { display: flex; gap: 8px; flex-wrap: wrap; }
+.viewonly { color: var(--muted); font-size: 14px; }
+
+.estop-wrap { display: grid; justify-items: center; align-content: center; gap: 10px; padding: 18px 28px; border-left: 1px solid var(--line); background: var(--inset); min-width: 210px; }
+.estop { width: 140px; height: 140px; border-radius: 50%; padding: 0; border: 0; background: var(--plate);
+  box-shadow: inset 0 0 0 4px rgba(0,0,0,.14), inset 0 -6px 10px rgba(0,0,0,.12), 0 2px 0 rgba(0,0,0,.25); display: grid; place-items: center; min-height: 0; }
+.estop:hover:not(:disabled) { background: var(--plate); }
+.estop .dome { width: 98px; height: 98px; border-radius: 50%; display: grid; place-items: center; color: #fff;
+  font: 700 22px var(--cond); letter-spacing: .03em; text-shadow: 0 1px 1px rgba(0,0,0,.35);
+  background: radial-gradient(circle at 34% 28%, #ff7a7a 0, #e3232b 34%, #b3141c 72%, #860d14 100%);
+  box-shadow: 0 7px 0 #640a10, 0 10px 16px rgba(0,0,0,.45); transition: transform .08s, box-shadow .08s; }
+.estop:hover .dome { filter: brightness(1.06); }
+.estop:active .dome, .estop.latched .dome { transform: translateY(5px); box-shadow: 0 2px 0 #640a10, 0 3px 6px rgba(0,0,0,.4); }
+.estop:focus-visible { outline: 3px solid var(--focus); outline-offset: 5px; }
+.estop-label { text-align: center; font-size: 14px; color: var(--ink-2); line-height: 1.35; }
+.estop-label b { font: 600 16px var(--cond); color: var(--ink); display: block; }
+
+/* ============================================================== tiles */
+.tiles { margin-top: 16px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; }
+.tile { padding: 14px 16px 14px; display: grid; gap: 6px; grid-template-rows: auto auto 1fr auto; position: relative; }
+.tile[data-level="warn"] { border-color: var(--warn); box-shadow: 0 0 0 1px var(--warn) inset, var(--shadow); }
+.tile[data-level="crit"] { border-color: var(--crit); box-shadow: 0 0 0 1px var(--crit) inset, var(--shadow); background: linear-gradient(var(--crit-bg), var(--crit-bg)), var(--panel); }
+.tile-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.tile h3 { font: 500 14px var(--font); color: var(--ink-2); }
+.val { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.val b { font: 600 38px/1.05 var(--cond); letter-spacing: -.01em; }
+.val span { color: var(--muted); font-size: 15px; font-weight: 500; }
+.val b.word { font-size: 27px; }
+.sub { color: var(--muted); font-size: 13px; line-height: 1.35; }
+.sub button { all: unset; cursor: pointer; color: var(--series); border-bottom: 1px dotted currentColor; }
+.sub button:focus-visible { outline: 2px solid var(--focus); }
+.sub button:hover:not(:disabled) { background: none; color: var(--ink); }
+.meter { position: relative; height: 8px; border-radius: 4px; background: var(--inset); margin-top: 6px; overflow: visible; }
+.meter .z { position: absolute; top: 0; bottom: 0; }
+.meter .z.warn { background: var(--warn); opacity: .32; }
+.meter .z.crit { background: var(--crit); opacity: .38; }
+.meter .fill { position: absolute; left: 0; top: 2px; bottom: 2px; border-radius: 2px; background: var(--meter); }
+.tile[data-level="warn"] .meter .fill { background: var(--warn); }
+.tile[data-level="crit"] .meter .fill { background: var(--crit); }
+.meter .sp { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--ink); border-radius: 1px; }
+.meter .mk { position: absolute; top: -3px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 2px var(--panel); }
+.rpm-edit { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.rpm-edit input { width: 80px; padding: 4px 6px; border: 1px solid var(--line-2); border-radius: 5px; background: var(--inset); }
+.rpm-edit button { min-height: 30px; padding: 2px 10px; font-size: 13px; }
+
+/* status words with a shape, so colour is never the only signal */
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.ind { width: 10px; height: 10px; flex: none; display: inline-block; border-radius: 50%; border: 2px solid var(--muted); }
+[data-level="good"] > .ind, .ind[data-level="good"] { border-color: var(--good); background: var(--good); }
+[data-level="warn"] > .ind, .ind[data-level="warn"] { border: 0; width: 12px; height: 11px; border-radius: 0; background: var(--warn); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-level="crit"] > .ind, .ind[data-level="crit"] { border: 0; border-radius: 2px; background: var(--crit); }
+.badge[data-level="good"] { color: var(--good-ink); }
+.badge[data-level="warn"] { color: var(--warn-ink); }
+.badge[data-level="crit"] { color: var(--crit-ink); }
+
+/* ============================================================== charts */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 26px 0 10px; flex-wrap: wrap; }
+.section-head p { color: var(--muted); font-size: 14px; }
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: var(--r-sm); overflow: hidden; }
+.seg button { border: 0; border-radius: 0; min-height: 34px; padding: 4px 14px; background: transparent; font-size: 14px; }
+.seg button + button { border-left: 1px solid var(--line-2); }
+.seg button[aria-pressed="true"] { background: var(--btn-hover); color: var(--ink); font-weight: 600; }
+.charts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.chart { margin: 0; padding: 14px 16px 12px; display: grid; gap: 6px; }
+.chart figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.chart .now { font: 600 22px var(--cond); white-space: nowrap; }
+.chart .now small { font: 500 13px var(--font); color: var(--muted); }
+.plot { position: relative; height: 230px; }
+.plot canvas { width: 100%; height: 100%; display: block; }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; text-align: center; padding: 20px; }
+.tip { position: absolute; display: none; pointer-events: none; z-index: 5; background: var(--panel); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 10px; font-size: 13px; box-shadow: 0 6px 18px rgba(0,0,0,.28); white-space: nowrap; }
+.tip .sw { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 6px; }
+.legend i.dash { border-top-style: dashed; }
+.chart .note { color: var(--muted); font-size: 13px; min-height: 2.7em; }
+
+/* ============================================================== lower panels */
+.lower { display: grid; grid-template-columns: 1.05fr 1fr 1.25fr; gap: 12px; margin-top: 12px; align-items: start; }
+.lower .panel { padding: 16px 18px; }
+.stack { display: grid; gap: 12px; align-content: start; }
+.panel > header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.panel > header p { color: var(--muted); font-size: 13px; }
+.checks, .health { list-style: none; margin: 0; padding: 0; }
+.checks li, .health li { display: grid; grid-template-columns: 16px 1fr auto; gap: 2px 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+.checks li:first-child, .health li:first-child { border-top: 0; }
+.checks .name, .health .name { font-weight: 500; }
+.checks .detail, .health .detail { grid-column: 2 / 4; color: var(--muted); font-size: 13px; margin-top: -2px; }
+.checks .word { font-size: 13px; font-weight: 600; color: var(--muted); }
+.checks li[data-level="good"] .word { color: var(--good-ink); }
+.checks li[data-level="warn"] .word { color: var(--warn-ink); }
+.checks li[data-level="crit"] .word { color: var(--crit-ink); }
+.checks li[data-level="warn"] { background: linear-gradient(90deg, var(--warn-bg), transparent); }
+.checks li[data-level="crit"] { background: linear-gradient(90deg, var(--crit-bg), transparent); }
+
+.stats { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.stats div { padding: 9px 0; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.stats div:nth-child(-n+2) { border-top: 0; }
+.stats dt { color: var(--ink-2); font-size: 14px; }
+.stats dd { margin: 0; font: 600 21px var(--cond); white-space: nowrap; }
+.stats dd small { font: 500 12px var(--font); color: var(--muted); margin-left: 2px; }
+.stats-foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+.log { list-style: none; margin: 0; padding: 0; max-height: 860px; overflow: auto; }
+.log li { display: grid; grid-template-columns: 14px 64px 1fr; gap: 8px; padding: 8px 2px; border-top: 1px solid var(--line); align-items: baseline; font-size: 14px; }
+.log li:first-child { border-top: 0; }
+.log time { color: var(--muted); font-size: 13px; }
+.log .ind { width: 9px; height: 9px; align-self: center; }
+.log li[data-level="info"] .ind { border-color: var(--muted); }
+.log li[data-level="warn"] .ind { width: 11px; height: 10px; }
+.log .empty-log { display: block; color: var(--muted); border: 0; }
+.log-filter { display: inline-flex; }
+
+.health .val2 { font-size: 14px; color: var(--ink); font-weight: 500; text-align: right; }
+.raw { margin-top: 12px; }
+.raw > summary { cursor: pointer; padding: 14px 18px; font: 600 17px var(--cond); list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+.raw > summary::-webkit-details-marker { display: none; }
+.raw > summary span { font: 400 13px var(--font); color: var(--muted); }
+.raw-body { padding: 0 18px 18px; display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+.table-scroll { overflow: auto; max-height: 340px; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 6px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+th { position: sticky; top: 0; background: var(--panel-2); color: var(--ink-2); font-weight: 600; }
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+pre.serial { margin: 0; background: var(--inset); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; height: 270px; overflow: auto; font: 12px/1.45 ui-monospace, Consolas, "Cascadia Mono", monospace; color: var(--ink-2); white-space: pre-wrap; word-break: break-all; }
+.cmdline { display: flex; gap: 8px; margin-top: 8px; }
+.cmdline input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--inset); }
+.cmd-help { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
+/* ============================================================== footer */
+footer { margin-top: 28px; border-top: 1px solid var(--line); background: var(--panel); }
+footer .wrap { display: grid; grid-template-columns: 1.1fr 1.3fr 1fr; gap: 24px; padding-top: 22px; padding-bottom: 26px; font-size: 14px; color: var(--ink-2); }
+footer h3 { font-size: 15px; margin-bottom: 6px; color: var(--ink); }
+footer ul { margin: 0; padding-left: 18px; }
+footer li { margin: 2px 0; }
+
+/* ============================================================== responsive */
+@media (max-width: 1360px) {
+  .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .lower { grid-template-columns: 1fr 1fr; }
+  .lower .log-panel { grid-column: 1 / -1; }
+  .lower .log-panel .log { max-height: 520px; }
+}
+@media (max-width: 1180px) {
+  .top .wrap { grid-template-columns: 1fr auto; }
+  .credits { grid-column: 1 / -1; grid-row: 2; justify-self: start; border-left: 0; padding-left: 0; }
+  .charts { grid-template-columns: 1fr 1fr; }
+  .charts .chart:last-child { grid-column: 1 / -1; }
+  .raw-body { grid-template-columns: 1fr; }
+  footer .wrap { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+  .wrap { padding: 0 16px; }
+  .top .wrap { grid-template-columns: 1fr; gap: 12px; }
+  .live { justify-items: start; grid-row: 3; }
+  .clock { text-align: left; }
+  .status-line { justify-content: flex-start; }
+  .logo { height: 46px; }
+  h1 { font-size: 24px; }
+  .state { grid-template-columns: 1fr; }
+  .state-main { padding: 18px 16px 16px 24px; }
+  #stState { font-size: 36px; }
+  .estop-wrap { border-left: 0; border-top: 1px solid var(--line); grid-template-columns: auto 1fr; justify-items: start; align-items: center; padding: 14px 16px 14px 24px; min-width: 0; }
+  .estop { width: 104px; height: 104px; }
+  .estop .dome { width: 72px; height: 72px; font-size: 18px; }
+  .estop-label { text-align: left; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .val b { font-size: 32px; }
+  .charts { grid-template-columns: 1fr; }
+  .plot { height: 200px; }
+  .lower { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: 1fr; }
+  .stats div:nth-child(2) { border-top: 1px solid var(--line); }
+  footer .wrap { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- ================================================================ header -->
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <img id="logo" class="logo" src="au_logo.png" alt="Ahmedabad University logo" onerror="this.hidden = true">
+      <div>
+        <div class="uni">Ahmedabad University</div>
+        <h1>Industrial Machine Safety Monitor</h1>
+        <p class="course">ENR206 course project, Monsoon 2026</p>
+      </div>
+    </div>
+    <dl class="credits">
+      <dt>Guided by</dt><dd class="prof">Prof. Aditya Tiwari</dd>
+      <dt>Team</dt><dd>Dhairya Sanathara, Kaushal Chitlange, Mahi Mistry, Kavan Vyas</dd>
+    </dl>
+    <div class="live">
+      <div class="clock"><b id="clkTime">--:--:--</b><span id="clkDate"></span></div>
+      <div class="status-line">
+        <span class="role" id="role"></span>
+        <span class="pill" id="connPill" data-s="off"><i class="dot"></i><span id="connText">Not connected</span></span>
+        <button class="quiet" id="btnTheme" type="button">Day mode</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- shown when the page is opened without server.py -->
+  <section class="connect panel" id="connectBar" hidden>
+    <p><b>Not connected to the machine.</b> On the lab PC, run <code>python server.py</code> and open <a href="http://localhost:8000">localhost:8000</a>.
+       You can also plug the Arduino into this computer and connect it straight to this page, or watch a demo machine.</p>
+    <div class="btns">
+      <button class="primary" id="btnUsb" type="button">Connect Arduino over USB</button>
+      <button id="btnDemo" type="button">Run demo machine</button>
+      <button id="btnUsbOff" type="button" hidden>Disconnect</button>
+    </div>
+    <p id="noSerial" class="muted" hidden>Connecting over USB needs Chrome or Edge on a computer.</p>
+  </section>
+
+  <!-- ============================================================ machine state -->
+  <section class="state panel" id="statePanel" data-level="none" aria-labelledby="stState">
+    <div class="state-main">
+      <div class="state-head">
+        <span class="lamp" aria-hidden="true"></span>
+        <h2 id="stState" aria-live="polite">Waiting for the machine</h2>
+        <span id="stFor"></span>
+      </div>
+      <p id="stWhy">Readings appear here as soon as the Arduino is connected.</p>
+      <div class="controls">
+        <button class="primary start" id="btnStart" type="button" disabled>Start motor</button>
+        <div class="speed">
+          <div class="speed-top"><label for="speed">Speed set point</label><output id="speedOut" for="speed">60 %</output></div>
+          <div class="speed-row">
+            <button type="button" id="btnSlower" aria-label="10 percent slower">−10</button>
+            <input type="range" id="speed" min="10" max="100" step="10" value="60">
+            <button type="button" id="btnFaster" aria-label="10 percent faster">+10</button>
+          </div>
+          <div class="presets">
+            <button type="button" data-speed="30">30 %</button>
+            <button type="button" data-speed="60">60 %</button>
+            <button type="button" data-speed="100">100 %</button>
+          </div>
+        </div>
+        <div class="aux">
+          <button type="button" id="btnZero" title="Take the machine's current position as level">Re-zero tilt</button>
+          <button type="button" id="btnLearn" title="Forget the learned normal vibration and learn it again">Re-learn vibration</button>
+        </div>
+      </div>
+      <p class="viewonly" id="viewOnly" hidden>You are watching from another device. Start and speed are controlled from the lab PC; the emergency stop works from here too.</p>
+    </div>
+    <div class="estop-wrap">
+      <button class="estop" id="btnEstop" type="button" aria-label="Emergency stop" title="Emergency stop (Esc key)"><span class="dome">STOP</span></button>
+      <div class="estop-label"><b>Emergency stop</b><span id="estopHint">Press, or hit <kbd>Esc</kbd></span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ live values -->
+  <section class="tiles" id="tiles" aria-label="Live readings"></section>
+
+  <!-- ============================================================ trends -->
+  <div class="section-head">
+    <div>
+      <h2>Live trends</h2>
+      <p>One reading every half second. Point at a graph, or tap it on a phone, to read any moment.</p>
+    </div>
+    <div class="seg" role="group" aria-label="Time shown on the graphs">
+      <button type="button" data-win="60" aria-pressed="false">1 min</button>
+      <button type="button" data-win="120" aria-pressed="true">2 min</button>
+      <button type="button" data-win="300" aria-pressed="false">5 min</button>
+    </div>
+  </div>
+  <section class="charts">
+    <figure class="chart panel">
+      <figcaption><h3>Vibration</h3><span class="now" id="nowVib">–</span></figcaption>
+      <div class="plot"><canvas id="cVib" role="img" aria-label="Vibration over time, in milli-g"></canvas><div class="tip" id="tipVib"></div><div class="empty" id="emptyVib">Waiting for readings</div></div>
+      <p class="note" id="noteVib"></p>
+    </figure>
+    <figure class="chart panel">
+      <figcaption><h3>Motor temperature</h3><span class="now" id="nowTemp">–</span></figcaption>
+      <div class="plot"><canvas id="cTemp" role="img" aria-label="Motor temperature over time, in degrees Celsius"></canvas><div class="tip" id="tipTemp"></div><div class="empty" id="emptyTemp">Waiting for readings</div></div>
+      <p class="note" id="noteTemp"></p>
+    </figure>
+    <figure class="chart panel">
+      <figcaption><h3>Shaft speed</h3><span class="now" id="nowRpm">–</span></figcaption>
+      <div class="plot"><canvas id="cRpm" role="img" aria-label="Estimated motor speed over time, in RPM"></canvas><div class="tip" id="tipRpm"></div><div class="empty" id="emptyRpm">Waiting for readings</div></div>
+      <div class="legend"><span><i style="border-color:var(--series)"></i>Actual</span><span><i class="dash" style="border-color:var(--series-2)"></i>Set point</span></div>
+    </figure>
+  </section>
+
+  <!-- ============================================================ checks, session, events -->
+  <section class="lower">
+    <div class="panel">
+      <header><h2>Protection checks</h2><p>What the Arduino is guarding against</p></header>
+      <ul class="checks" id="checkList"></ul>
+    </div>
+
+    <div class="stack">
+    <div class="panel">
+      <header><h2>This session</h2><p id="sessionSince"></p></header>
+      <dl class="stats" id="stats"></dl>
+      <div class="stats-foot">
+        <button type="button" id="btnCsv">Download readings (CSV)</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <header><h2>System health</h2><p>Sensors and the data link</p></header>
+      <ul class="health" id="health"></ul>
+    </div>
+    </div>
+
+    <div class="panel log-panel">
+      <header>
+        <h2>Event log</h2>
+        <div class="seg log-filter" role="group" aria-label="Which events to show">
+          <button type="button" data-filter="all" aria-pressed="true">All</button>
+          <button type="button" data-filter="alarms" aria-pressed="false">Alarms</button>
+        </div>
+      </header>
+      <ol class="log" id="log"><li class="empty-log">Events such as starts, warnings and emergency stops are listed here.</li></ol>
+    </div>
+
+  </section>
+
+  <!-- ============================================================ raw data -->
+  <details class="raw panel" id="rawBox">
+    <summary>Raw data from the Arduino <span>Readings table, serial lines and a command box</span></summary>
+    <div class="raw-body">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Time</th><th>State</th><th>Speed %</th><th>PWM</th><th>RPM≈</th><th>Temp °C</th><th>°C/min</th><th>Vib mg</th><th>Dist cm</th><th>Tilt °</th><th>Hum %</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div>
+        <pre class="serial" id="serial" aria-label="Lines received from the Arduino"></pre>
+        <div class="cmdline">
+          <input id="cmd" placeholder="Type a command, e.g. 70 or s" autocomplete="off" aria-label="Command for the Arduino">
+          <button type="button" id="btnSend">Send</button>
+        </div>
+        <p class="cmd-help">g start or reset, x emergency stop, 10 to 100 speed in %, + and − change speed by 10 %, s status report, z re-zero tilt, l re-learn vibration.</p>
+      </div>
+    </div>
+  </details>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <h3>About the project</h3>
+      <p>An Arduino watches a running motor and stops it before anyone gets hurt or the machine is damaged: a person too close, overheating, abnormal vibration, a jam or a tilt. This page shows every reading live and controls the machine from the lab PC.</p>
+    </div>
+    <div>
+      <h3>Hardware</h3>
+      <ul>
+        <li>Arduino Uno with a hardware-interrupt emergency stop and watchdog</li>
+        <li>12 V geared DC motor, L298N driver (PWM speed) and a power relay</li>
+        <li>MPU6050 for vibration and tilt, <span id="dhtName">DHT22</span> for temperature and humidity</li>
+        <li>HC-SR04 ultrasonic sensor for people near the machine</li>
+        <li>16×2 I2C LCD, status lights, buzzer, 12 V / 5 V SMPS</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Team</h3>
+      <p>Dhairya Sanathara, Kaushal Chitlange, Mahi Mistry and Kavan Vyas, guided by Prof. Aditya Tiwari.</p>
+      <p style="margin-top:8px">ENR206, Ahmedabad University, 2026.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+
+  // =================================================================== constants
+  const DEFAULT_COLS = ["ms","state","reason","dist_cm","temp_c","temp_rate_cpm","vib_mg","tilt_deg",
+    "current_ma","bus_v","power_w","pwm","vib_warn_mg","vib_stop_mg","cur_warn_ma","cur_stop_ma",
+    "humidity_pct","speed_pct","speed_now_pct"];
+  const PWM_MIN = 70;                  // same as the firmware: 1 % speed = PWM 70
+  const DRIVE_FACTOR = 10 / 12;        // the L298N drops ~2 V of the 12 V supply
+  const NOT_LEARNED = 800;             // firmware sends 800 mg limits until it learns the normal level
+  const DIST_CLEAR = 149;              // 150 cm = nothing in front of the sensor
+  const MAX_ROWS = 30000;
+  const STALE_MS = 5000;
+
+  const STATE_WORD = { IDLE: "Ready", RUN: "Running", WARNING: "Warning", ESTOP: "Emergency stop", FAULT: "System fault" };
+  const STATE_LEVEL = { IDLE: "none", RUN: "good", WARNING: "warn", ESTOP: "crit", FAULT: "crit" };
+  const REASON_TEXT = {
+    OK: "All checks normal", ESTOP_BTN: "Emergency stop button pressed", REMOTE: "Stopped from the computer",
+    RELAY_STUCK: "Power relay stuck on", NO_POWER: "No 12 V reaching the motor", SENS_TEMP: "Temperature sensor not answering",
+    SENS_MPU: "Vibration sensor (MPU6050) not answering", SENS_INA: "Current sensor not answering",
+    PROX: "Person too close to the machine", OVERLOAD: "Motor overloaded", STALL: "Motor stalled or jammed",
+    OVERHEAT: "Motor overheating", TEMP_RATE: "Temperature rising too fast", VIBRATION: "Vibration too high",
+    TILT: "Machine tilted"
+  };
+  const CMD_TEXT = { g: "Start / reset", x: "Emergency stop", z: "Re-zero tilt", l: "Re-learn vibration",
+    s: "Status report", d: "Data mode", "+": "Speed +10 %", "-": "Speed −10 %" };
+  const CHECKS = [
+    { id: "estop", name: "Emergency stop", reasons: ["ESTOP_BTN", "REMOTE"] },
+    { id: "prox",  name: "Person near the machine", reasons: ["PROX"] },
+    { id: "heat",  name: "Motor temperature", reasons: ["OVERHEAT"] },
+    { id: "rate",  name: "Temperature rise rate", reasons: ["TEMP_RATE"] },
+    { id: "vib",   name: "Vibration", reasons: ["VIBRATION"] },
+    { id: "stall", name: "Motor stall or jam", reasons: ["STALL"] },
+    { id: "tilt",  name: "Machine tilt", reasons: ["TILT"] },
+    { id: "power", name: "Motor power and relay", reasons: ["RELAY_STUCK", "NO_POWER", "OVERLOAD"] },
+    { id: "sens",  name: "Sensors answering", reasons: ["SENS_TEMP", "SENS_MPU", "SENS_INA"] }
+  ];
+
+  // ======================================================================= state
+  const S = {
+    mode: "none",                      // server | usb | demo | none
+    canControl: false,
+    cols: DEFAULT_COLS.slice(),
+    limits: { dist_warn_cm: 40, dist_stop_cm: 15, temp_warn_c: 40, temp_stop_c: 50,
+              rate_warn_cpm: 6, rate_stop_cpm: 15, tilt_warn_deg: 10, tilt_stop_deg: 25 },
+    rows: [],
+    log: [],
+    st: null,
+    sessionStart: Date.now(),
+    evState: null,                     // last state seen in an event (for counting)
+    state: null, stateSince: null,
+    sensors: { mpu: null, dht: null, dhtName: "DHT22", lcd: null },
+    i2cOk: true,
+    link: { connected: false, port: null, message: "" },
+    viewers: null,
+    lastArrival: 0,
+    lastMs: -1,
+    ratedRpm: 300,
+    win: 120000,
+    serial: [],
+    filter: "all"
+  };
+  function freshStats() {
+    return { starts: 0, estops: 0, warnings: 0, faults: 0, speedChanges: 0, runS: 0, warnS: 0,
+             peakTemp: NaN, peakVib: NaN, minDist: NaN, samples: 0, wdResets: 0, i2cErr: 0 };
+  }
+  S.st = freshStats();
+  try { const v = +localStorage.getItem("msm-rated-rpm"); if (v >= 10 && v <= 20000) S.ratedRpm = v; } catch (_) {}
+
+  // ===================================================================== helpers
+  const $ = id => document.getElementById(id);
+  const num = s => { const v = parseFloat(s); return Number.isFinite(v) ? v : NaN; };
+  const ok = v => typeof v === "number" && Number.isFinite(v);
+  const fmt = (v, d) => ok(v) ? v.toFixed(d) : "–";
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const hms = t => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function dur(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    return h ? `${h} h ${String(m).padStart(2, "0")} min` : m ? `${m} min ${String(s).padStart(2, "0")} s` : `${s} s`;
+  }
+  const pctToPwm = p => p > 0 ? PWM_MIN + (255 - PWM_MIN) * p / 100 : 0;
+  const pwmToRpm = pwm => ok(pwm) ? S.ratedRpm * (pwm / 255) * DRIVE_FACTOR : NaN;
+  const maxRpm = () => S.ratedRpm * DRIVE_FACTOR;
+  const running = st => st === "RUN" || st === "WARNING";
+  const learned = r => r && r.vib_warn_mg < NOT_LEARNED;
+  const levelHigh = (v, w, s) => !ok(v) ? "none" : v >= s ? "crit" : v >= w ? "warn" : "good";
+  const levelLow = (v, w, s) => !ok(v) ? "none" : v <= s ? "crit" : v <= w ? "warn" : "good";
+  const worst = (...l) => l.includes("crit") ? "crit" : l.includes("warn") ? "warn" : l.includes("good") ? "good" : "none";
+
+  // ===================================================================== tiles
+  const TILES = [
+    { id: "speed", title: "Motor speed", unit: "%" },
+    { id: "rpm",   title: "Shaft speed", unit: "RPM" },
+    { id: "temp",  title: "Temperature", unit: "°C" },
+    { id: "vib",   title: "Vibration", unit: "mg" },
+    { id: "dist",  title: "Nearest person", unit: "cm" },
+    { id: "tilt",  title: "Tilt", unit: "°" },
+    { id: "hum",   title: "Humidity", unit: "%" }
+  ];
+  const T = {};
+  for (const d of TILES) {
+    const a = document.createElement("article");
+    a.className = "tile panel"; a.dataset.level = "none";
+    a.innerHTML = `<div class="tile-head"><h3>${d.title}</h3><span class="badge" data-level="none"><i class="ind"></i><span>–</span></span></div>
+      <div class="val"><b>–</b><span>${d.unit}</span></div><p class="sub"></p><div class="meter"></div>`;
+    $("tiles").append(a);
+    T[d.id] = { el: a, badge: a.querySelector(".badge"), word: a.querySelector(".badge span"), val: a.querySelector(".val b"),
+                unit: a.querySelector(".val span"), sub: a.querySelector(".sub"), meter: a.querySelector(".meter"), unitText: d.unit };
+  }
+  function setTile(id, { level = "none", word = "–", value = "–", isWord = false, unit, sub, meter = "" }) {
+    const t = T[id];
+    t.el.dataset.level = level; t.badge.dataset.level = level; t.word.textContent = word;
+    t.val.textContent = value; t.val.classList.toggle("word", isWord);
+    t.unit.textContent = isWord ? "" : (unit !== undefined ? unit : t.unitText);
+    if (sub !== undefined) t.sub.textContent = sub;
+    t.meter.innerHTML = meter;
+  }
+  // a bar from min to max with the warning / stop zones and a marker at the value
+  function meter(min, max, v, zones, setPoint) {
+    const p = x => Math.max(0, Math.min(100, (x - min) / (max - min) * 100));
+    let h = (zones || []).map(z => `<i class="z ${z.l}" style="left:${p(z.a)}%;width:${p(z.b) - p(z.a)}%"></i>`).join("");
+    if (ok(v)) h += `<i class="fill" style="width:${p(v)}%"></i><i class="mk" style="left:${p(v)}%"></i>`;
+    if (ok(setPoint)) h += `<i class="sp" style="left:${p(setPoint)}%" title="set point"></i>`;
+    return h;
+  }
+  const LEVEL_WORD = { good: "Normal", warn: "Warning", crit: "Stop limit", none: "–" };
+
+  // RPM tile: an estimate from the drive, with the motor's rated RPM editable in place
+  let rpmEditing = false;
+  function rpmSubDefault() {
+    T.rpm.sub.innerHTML = `estimated from PWM duty, <button type="button" id="rpmBtn" title="Estimate = rated RPM × PWM duty × 10 V / 12 V (the L298N drops about 2 V). Click to enter the RPM printed on your motor.">rated ${S.ratedRpm} RPM</button>`;
+    $("rpmBtn").addEventListener("click", openRpmEdit);
+  }
+  function openRpmEdit() {
+    rpmEditing = true;
+    const t = T.rpm; t.sub.innerHTML = "";
+    const f = document.createElement("form"); f.className = "rpm-edit";
+    f.innerHTML = `<label class="muted" for="rpmIn">Rated</label><input id="rpmIn" type="number" min="10" max="20000" step="1" value="${S.ratedRpm}"><button type="submit">Save</button>`;
+    f.addEventListener("submit", e => {
+      e.preventDefault();
+      const v = Math.round(+f.querySelector("input").value);
+      if (v >= 10 && v <= 20000) { S.ratedRpm = v; try { localStorage.setItem("msm-rated-rpm", v); } catch (_) {} }
+      rpmEditing = false; rpmSubDefault(); render();
+    });
+    t.sub.append(f); f.querySelector("input").focus(); f.querySelector("input").select();
+  }
+
+  // ===================================================================== charts
+  // One measure per chart, one y-axis, 2 px lines. Limit lines in amber / red.
+  class TimeChart {
+    constructor(id, cfg) {
+      this.c = $("c" + id); this.tip = $("tip" + id); this.empty = $("empty" + id); this.cfg = cfg;
+      this.ctx = this.c.getContext("2d"); this.hoverX = null;
+      this.pad = { l: 44, r: 70, t: 12, b: 24 };
+      const move = x => { this.hoverX = x; this.draw(); };
+      this.c.addEventListener("mousemove", e => move(e.clientX - this.c.getBoundingClientRect().left));
+      this.c.addEventListener("touchstart", e => move(e.touches[0].clientX - this.c.getBoundingClientRect().left), { passive: true });
+      this.c.addEventListener("touchmove", e => move(e.touches[0].clientX - this.c.getBoundingClientRect().left), { passive: true });
+      const leave = () => { this.hoverX = null; this.tip.style.display = "none"; this.draw(); };
+      this.c.addEventListener("mouseleave", leave); this.c.addEventListener("touchend", leave);
+      new ResizeObserver(() => this.draw()).observe(this.c);
+    }
+    ticks(min, max, count) {
+      const span = max - min || 1, raw = span / count, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= count) || 10 * mag;
+      const out = []; for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(+v.toFixed(6));
+      return out;
+    }
+    points() {
+      const rows = S.rows; if (!rows.length) return [];
+      const tEnd = rows[rows.length - 1].t, from = tEnd - S.win;
+      let lo = 0, hi = rows.length - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (rows[mid].t < from) lo = mid + 1; else hi = mid; }
+      return rows.slice(Math.max(0, lo - 1));
+    }
+    draw() {
+      const cfg = this.cfg, c = this.c, ctx = this.ctx, dpr = window.devicePixelRatio || 1;
+      const W = c.clientWidth, H = c.clientHeight;
+      if (!W || !H) return;
+      if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      const pts = this.points();
+      this.empty.style.display = pts.length ? "none" : "grid";
+      if (!pts.length) return;
+
+      const P = this.pad, x0 = P.l, x1 = W - P.r, y0 = P.t, y1 = H - P.b;
+      const tEnd = pts[pts.length - 1].t, tStart = tEnd - S.win;
+      const X = t => x0 + (t - tStart) / S.win * (x1 - x0);
+      const [ymin, ymax] = cfg.range(pts);
+      const Y = v => y1 - (Math.min(Math.max(v, ymin), ymax) - ymin) / (ymax - ymin) * (y1 - y0);
+      const muted = css("--muted"), grid = css("--grid"), axis = css("--axis"), ink2 = css("--ink-2");
+      const font = w => `${w || 400} 12px Barlow, "Segoe UI", system-ui, sans-serif`;
+      ctx.font = font();
+
+      // limit zones (faint wash) above each limit line
+      const refs = (cfg.refs ? cfg.refs(pts) : []).filter(r => r.v > ymin && r.v < ymax);
+      refs.forEach((r, i) => {
+        const top = refs[i + 1] ? refs[i + 1].v : ymax;
+        ctx.fillStyle = css(r.color); ctx.globalAlpha = 0.06;
+        ctx.fillRect(x0, Y(top), x1 - x0, Y(r.v) - Y(top)); ctx.globalAlpha = 1;
+      });
+      // grid + y ticks
+      ctx.lineWidth = 1; ctx.strokeStyle = grid; ctx.fillStyle = muted; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      for (const v of this.ticks(ymin, ymax, 4)) {
+        const y = Math.round(Y(v)) + 0.5;
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+        ctx.fillText(cfg.tick(v), x0 - 6, y);
+      }
+      // x ticks: seconds ago
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      const stepS = S.win <= 60000 ? 15 : S.win <= 120000 ? 30 : 60;
+      for (let s = 0; s <= S.win / 1000; s += stepS) {
+        const x = X(tEnd - s * 1000);
+        ctx.fillText(s === 0 ? "now" : S.win > 120000 ? `−${s / 60} min` : `−${s} s`, x, y1 + 7);
+      }
+      ctx.strokeStyle = axis; ctx.beginPath(); ctx.moveTo(x0, Math.round(y1) + 0.5); ctx.lineTo(x1, Math.round(y1) + 0.5); ctx.stroke();
+
+      // limit lines
+      for (const r of refs) {
+        const y = Math.round(Y(r.v)) + 0.5;
+        ctx.strokeStyle = css(r.color); ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = ink2; ctx.textAlign = "left"; ctx.textBaseline = "bottom"; ctx.font = font(500);
+        ctx.fillText(r.label, x0 + 6, y - 3); ctx.font = font();
+      }
+
+      // series (clipped to the plot area)
+      ctx.save(); ctx.beginPath(); ctx.rect(x0, y0 - 4, x1 - x0, y1 - y0 + 8); ctx.clip();
+      for (const s of cfg.series.slice().reverse()) {
+        ctx.strokeStyle = css(s.color); ctx.lineWidth = s.width || 2; ctx.lineJoin = "round"; ctx.lineCap = "round";
+        if (s.dash) ctx.setLineDash(s.dash);
+        ctx.beginPath(); let on = false, py = 0, pt = 0;
+        for (const p of pts) {
+          const v = s.get(p);
+          if (!ok(v) || (on && p.t - pt > 3000)) { on = false; if (!ok(v)) continue; }
+          const x = X(p.t), y = Y(v);
+          if (!on) { ctx.moveTo(x, y); on = true; }
+          else if (s.step) { ctx.lineTo(x, py); ctx.lineTo(x, y); }
+          else ctx.lineTo(x, y);
+          py = y; pt = p.t;
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+      ctx.restore();
+
+      // end dot + value of the main series
+      const main = cfg.series[0], last = pts[pts.length - 1], lv = main.get(last);
+      if (ok(lv)) {
+        const ex = X(last.t), ey = Y(lv);
+        ctx.fillStyle = css("--panel"); ctx.beginPath(); ctx.arc(ex, ey, 6, 0, 7); ctx.fill();
+        ctx.fillStyle = css(main.color); ctx.beginPath(); ctx.arc(ex, ey, 4, 0, 7); ctx.fill();
+        ctx.fillStyle = css("--ink"); ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.font = font(600);
+        ctx.fillText(cfg.valueText(lv), ex + 9, Math.max(y0 + 6, Math.min(y1 - 6, ey)));
+      }
+
+      // hover read-out
+      if (this.hoverX !== null && this.hoverX >= x0 && this.hoverX <= x1) {
+        const t = tStart + (this.hoverX - x0) / (x1 - x0) * S.win;
+        let best = pts[0]; for (const p of pts) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
+        const hx = Math.round(X(best.t)) + 0.5;
+        ctx.strokeStyle = axis; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx, y0); ctx.lineTo(hx, y1); ctx.stroke();
+        for (const s of cfg.series) {
+          const v = s.get(best); if (!ok(v)) continue;
+          ctx.fillStyle = css("--panel"); ctx.beginPath(); ctx.arc(hx, Y(v), 6, 0, 7); ctx.fill();
+          ctx.fillStyle = css(s.color); ctx.beginPath(); ctx.arc(hx, Y(v), 4, 0, 7); ctx.fill();
+        }
+        let html = `<div class="muted">${hms(best.t)} &middot; ${esc(STATE_WORD[best.state] || best.state)}</div>`;
+        for (const s of cfg.series) { const v = s.get(best); if (ok(v)) html += `<div><span class="sw" style="background:var(${s.color})"></span>${s.label}: <b>${cfg.valueText(v)}</b></div>`; }
+        if (cfg.extraTip) html += cfg.extraTip(best);
+        this.tip.innerHTML = html; this.tip.style.display = "block";
+        const tw = this.tip.offsetWidth; let left = hx + 12; if (left + tw > W) left = hx - tw - 12;
+        this.tip.style.left = Math.max(0, left) + "px"; this.tip.style.top = (y0 + 4) + "px";
+      } else this.tip.style.display = "none";
+    }
+  }
+
+  const vibChart = new TimeChart("Vib", {
+    series: [{ label: "Vibration", color: "--series", get: p => p.vib_mg }],
+    refs: pts => { const l = pts[pts.length - 1]; if (!learned(l)) return [];
+      return [{ v: l.vib_warn_mg, label: `warning ${l.vib_warn_mg.toFixed(0)} mg`, color: "--warn" },
+              { v: l.vib_stop_mg, label: `stop ${l.vib_stop_mg.toFixed(0)} mg`, color: "--crit" }]; },
+    range: pts => { const l = pts[pts.length - 1]; let m = 20;
+      for (const p of pts) if (p.vib_mg > m) m = p.vib_mg;
+      if (learned(l)) m = Math.max(m, l.vib_stop_mg);
+      return [0, Math.ceil(m * 1.15 / 10) * 10]; },
+    tick: v => v.toFixed(0), valueText: v => `${fmt(v, 1)} mg`
+  });
+  const tempChart = new TimeChart("Temp", {
+    series: [{ label: "Temperature", color: "--series", get: p => p.temp_c }],
+    refs: () => [{ v: S.limits.temp_warn_c, label: `warning ${S.limits.temp_warn_c} °C`, color: "--warn" },
+                 { v: S.limits.temp_stop_c, label: `stop ${S.limits.temp_stop_c} °C`, color: "--crit" }],
+    // zoom on the readings; the limit lines join in once the temperature gets within 8 °C
+    range: pts => { let lo = Infinity, hi = -Infinity;
+      for (const p of pts) if (ok(p.temp_c)) { lo = Math.min(lo, p.temp_c); hi = Math.max(hi, p.temp_c); }
+      if (lo === Infinity) return [20, 30];
+      lo = Math.floor(lo - 1.5); hi = Math.ceil(hi + 1.5);
+      if (hi > S.limits.temp_warn_c - 8) hi = Math.max(hi, S.limits.temp_stop_c + 3);
+      if (hi - lo < 5) hi = lo + 5;
+      return [lo, hi]; },
+    tick: v => v.toFixed(v % 1 ? 1 : 0) + "°", valueText: v => `${fmt(v, 1)} °C`,
+    extraTip: p => `<div class="muted">rising ${fmt(p.temp_rate_cpm, 2)} °C/min</div>`
+  });
+  const rpmChart = new TimeChart("Rpm", {
+    series: [{ label: "Actual", color: "--series", get: p => pwmToRpm(p.pwm) },
+             { label: "Set point", color: "--series-2", get: p => running(p.state) ? pwmToRpm(pctToPwm(p.speed_pct)) : NaN, step: true, width: 1.5, dash: [5, 4] }],
+    range: () => [0, Math.ceil(maxRpm() * 1.12 / 50) * 50 || 100],
+    tick: v => v.toFixed(0), valueText: v => `${fmt(v, 0)} RPM`,
+    extraTip: p => `<div class="muted">${fmt(p.speed_now_pct, 0)} % speed, PWM ${fmt(p.pwm, 0)}/255</div>`
+  });
+  const charts = [vibChart, tempChart, rpmChart];
+
+  // ================================================================== rendering
+  let queued = false;
+  function queueDraw() {
+    if (queued) return; queued = true;
+    requestAnimationFrame(() => { queued = false; render(); });
+  }
+
+  function stale() { return S.mode !== "none" && S.rows.length && Date.now() - S.lastArrival > STALE_MS; }
+
+  function render() {
+    charts.forEach(c => c.draw());
+    renderState(); renderTiles(); renderChecks(); renderStats(); renderHealth(); renderTable(); renderControls();
+  }
+
+  function renderState() {
+    const r = S.rows[S.rows.length - 1], panel = $("statePanel");
+    let level = "none", word = "Waiting for the machine", why = "", forText = "";
+    if (S.mode === "none") why = "Readings appear here as soon as the Arduino is connected.";
+    else if (S.mode === "server" && !S.link.connected) { word = "Arduino not connected"; level = "none"; why = S.link.message || "The server is looking for the Arduino."; }
+    else if (!r) why = "Connected. Waiting for the first readings (the Arduino restarts when the link opens).";
+    else if (stale()) { word = "No readings"; why = `Nothing received for ${Math.round((Date.now() - S.lastArrival) / 1000)} s. Check the USB cable and the Arduino's power.`; }
+    else {
+      level = STATE_LEVEL[r.state] || "none";
+      word = (STATE_WORD[r.state] || r.state) + (running(r.state) ? ` at ${fmt(r.speed_now_pct, 0)} %` : "");
+      const reason = REASON_TEXT[r.reason] || r.reason;
+      why = {
+        IDLE: r.reason === "OK" ? "Motor stopped and ready. Press Start motor, or GO on the machine." : `Not ready: ${reason}.`,
+        RUN: !learned(r) ? "Running. Learning this speed's normal vibration (about 6 s); keep the machine untouched." : "Running normally. Every protection check is passing.",
+        WARNING: `${reason}. The motor has slowed to a safe speed and speeds up again 3 s after the cause clears.`,
+        ESTOP: `${reason}. The stop is latched: clear the cause, press Reset, then Start motor.`,
+        FAULT: `${reason}. Fix the wiring, then press Reset to test the sensors again.`
+      }[r.state] || reason;
+      if (S.stateSince) forText = "for " + dur((r.t - S.stateSince) / 1000);
+    }
+    panel.dataset.level = level;
+    if ($("stState").textContent !== word) $("stState").textContent = word;
+    $("stWhy").textContent = why;
+    $("stFor").textContent = forText;
+    $("btnEstop").classList.toggle("latched", !!r && r.state === "ESTOP" && !stale());
+    $("estopHint").innerHTML = r && r.state === "ESTOP" && !stale() ? "Latched. Press Reset to release." : "Press, or hit <kbd>Esc</kbd>";
+  }
+
+  function renderControls() {
+    const r = S.rows[S.rows.length - 1], live = S.mode !== "none" && !!r && !stale() && (S.mode !== "server" || S.link.connected);
+    const ctl = live && S.canControl;
+    const b = $("btnStart");
+    if (r && (r.state === "ESTOP" || r.state === "FAULT")) { b.textContent = "Reset"; b.disabled = !ctl; }
+    else if (r && running(r.state)) { b.textContent = "Running"; b.disabled = true; }
+    else { b.textContent = "Start motor"; b.disabled = !ctl; }
+    for (const id of ["btnSlower", "btnFaster", "speed", "btnZero", "btnLearn"]) $(id).disabled = !ctl;
+    document.querySelectorAll("[data-speed]").forEach(x => x.disabled = !ctl);
+    $("btnEstop").disabled = S.mode === "none";
+    $("viewOnly").hidden = !(S.mode === "server" && !S.canControl);
+    if (r && ok(r.speed_pct) && !dragging && document.activeElement !== $("speed")) {
+      $("speed").value = r.speed_pct; $("speedOut").textContent = r.speed_pct + " %";
+    }
+  }
+
+  function renderTiles() {
+    const r = S.rows[S.rows.length - 1];
+    if (!r) { for (const d of TILES) setTile(d.id, { sub: d.id === "rpm" ? undefined : "" }); return; }
+    const L = S.limits;
+
+    // speed
+    const setPct = running(r.state) ? r.speed_pct : NaN;
+    setTile("speed", { level: r.state === "WARNING" ? "warn" : running(r.state) ? "good" : "none",
+      word: r.state === "WARNING" ? "Slowed" : running(r.state) ? "Running" : "Stopped",
+      value: fmt(r.speed_now_pct, 0), sub: `set point ${fmt(r.speed_pct, 0)} %, PWM ${fmt(r.pwm, 0)}/255`,
+      meter: meter(0, 100, r.speed_now_pct, null, setPct) });
+
+    // RPM (estimated from the drive duty)
+    const rpm = pwmToRpm(r.pwm);
+    if (!rpmEditing) setTile("rpm", { level: running(r.state) ? "good" : "none", word: running(r.state) ? "Turning" : "Stopped",
+      value: ok(rpm) ? "≈ " + rpm.toFixed(0) : "–",
+      meter: meter(0, maxRpm(), rpm, null, running(r.state) ? pwmToRpm(pctToPwm(r.speed_pct)) : NaN) });
+    else { T.rpm.val.textContent = ok(rpm) ? "≈ " + rpm.toFixed(0) : "–"; T.rpm.meter.innerHTML = meter(0, maxRpm(), rpm); }
+
+    // temperature + rise rate
+    if (!ok(r.temp_c)) setTile("temp", { level: "crit", word: "No reading", value: "–", sub: "sensor not answering" });
+    else {
+      const tl = levelHigh(r.temp_c, L.temp_warn_c, L.temp_stop_c);
+      const rl = r._rateOk ? levelHigh(r.temp_rate_cpm, L.rate_warn_cpm, L.rate_stop_cpm) : "good";
+      const lv = worst(tl, rl);
+      setTile("temp", { level: lv, word: lv === "good" ? "Normal" : (tl === "good" ? "Rising fast" : LEVEL_WORD[lv]),
+        value: fmt(r.temp_c, 1),
+        sub: r._rateOk ? `${r.temp_rate_cpm >= 0 ? "rising +" : "falling "}${fmt(Math.abs(r.temp_rate_cpm), 2)} °C/min, warn ${L.temp_warn_c} °C` : `rise rate: measuring…, warn ${L.temp_warn_c} °C`,
+        meter: meter(15, 60, r.temp_c, [{ a: L.temp_warn_c, b: L.temp_stop_c, l: "warn" }, { a: L.temp_stop_c, b: 60, l: "crit" }]) });
+    }
+
+    // vibration
+    if (learned(r)) {
+      const top = Math.max(r.vib_stop_mg * 1.25, r.vib_mg * 1.05);
+      const lv = levelHigh(r.vib_mg, r.vib_warn_mg, r.vib_stop_mg);
+      setTile("vib", { level: lv, word: LEVEL_WORD[lv], value: fmt(r.vib_mg, 1),
+        sub: `normal ${fmt(r.vib_warn_mg / 2, 0)}, warn ${fmt(r.vib_warn_mg, 0)}, stop ${fmt(r.vib_stop_mg, 0)} mg`,
+        meter: meter(0, top, r.vib_mg, [{ a: r.vib_warn_mg, b: r.vib_stop_mg, l: "warn" }, { a: r.vib_stop_mg, b: top, l: "crit" }]) });
+    } else {
+      setTile("vib", { level: r.vib_mg >= NOT_LEARNED ? "crit" : "none", word: running(r.state) ? "Learning" : "Not learned",
+        value: fmt(r.vib_mg, 1), sub: running(r.state) ? "learning the normal level for this speed…" : "limits are learned when the motor runs",
+        meter: meter(0, 200, r.vib_mg) });
+    }
+
+    // distance (low is bad)
+    const near = r.dist_cm < DIST_CLEAR;
+    const dl = near ? levelLow(r.dist_cm, L.dist_warn_cm, L.dist_stop_cm) : "good";
+    setTile("dist", { level: dl, word: near ? (dl === "good" ? "Nearby" : dl === "warn" ? "Too close" : "Danger") : "Clear",
+      value: near ? fmt(r.dist_cm, 0) : "Clear", isWord: !near,
+      sub: `slows under ${L.dist_warn_cm} cm, stops under ${L.dist_stop_cm} cm`,
+      meter: meter(0, 150, Math.min(r.dist_cm, 150), [{ a: 0, b: L.dist_stop_cm, l: "crit" }, { a: L.dist_stop_cm, b: L.dist_warn_cm, l: "warn" }]) });
+
+    // tilt
+    const tl = levelHigh(r.tilt_deg, L.tilt_warn_deg, L.tilt_stop_deg);
+    setTile("tilt", { level: tl, word: LEVEL_WORD[tl], value: fmt(r.tilt_deg, 1),
+      sub: `warn ${L.tilt_warn_deg}°, stop ${L.tilt_stop_deg}° from level`,
+      meter: meter(0, 30, r.tilt_deg, [{ a: L.tilt_warn_deg, b: L.tilt_stop_deg, l: "warn" }, { a: L.tilt_stop_deg, b: 30, l: "crit" }]) });
+
+    // humidity (information only)
+    setTile("hum", { level: ok(r.humidity_pct) ? "none" : "none", word: "Room", value: fmt(r.humidity_pct, 0),
+      sub: "air around the machine, for information", meter: meter(0, 100, r.humidity_pct) });
+
+    // chart headers + notes
+    $("nowVib").innerHTML = `${fmt(r.vib_mg, 1)} <small>mg</small>`;
+    $("nowTemp").innerHTML = ok(r.temp_c) ? `${fmt(r.temp_c, 1)} <small>°C</small>` : "–";
+    $("nowRpm").innerHTML = ok(rpm) ? `≈ ${rpm.toFixed(0)} <small>RPM (${fmt(r.speed_now_pct, 0)} %)</small>` : "–";
+    $("noteVib").textContent = learned(r)
+      ? `Normal vibration at this speed is learned; warning at 2× normal (${fmt(r.vib_warn_mg, 0)} mg), stop at 3.5× (${fmt(r.vib_stop_mg, 0)} mg).`
+      : "The warning and stop lines appear once the motor has run about 6 s at a speed and its normal vibration is learned.";
+    $("noteTemp").textContent = `Warning at ${L.temp_warn_c} °C, stop at ${L.temp_stop_c} °C. A rise faster than ${L.rate_warn_cpm} °C/min also warns, and ${L.rate_stop_cpm} °C/min stops the motor.`;
+  }
+
+  function renderChecks() {
+    const r = S.rows[S.rows.length - 1], L = S.limits;
+    const items = CHECKS.map(c => {
+      let level = r ? "good" : "none", word = r ? "Normal" : "–", detail = "";
+      const tripped = r && (r.state === "ESTOP" || r.state === "FAULT") && c.reasons.includes(r.reason);
+      const warning = r && r.state === "WARNING" && c.reasons.includes(r.reason);
+      if (r) switch (c.id) {
+        case "estop": detail = "Hardware interrupt on D3, latches until reset"; break;
+        case "prox": detail = r.dist_cm < DIST_CLEAR ? `${fmt(r.dist_cm, 0)} cm away (slow under ${L.dist_warn_cm}, stop under ${L.dist_stop_cm} cm)` : "Nobody within 1.5 m";
+          if (!tripped && !warning && r.dist_cm < DIST_CLEAR) { const l = levelLow(r.dist_cm, L.dist_warn_cm, L.dist_stop_cm); if (l !== "good") { level = l; word = "Too close"; } } break;
+        case "heat": detail = ok(r.temp_c) ? `${fmt(r.temp_c, 1)} °C (warn ${L.temp_warn_c}, stop ${L.temp_stop_c} °C)` : "No reading";
+          if (!tripped && !warning && ok(r.temp_c)) { const l = levelHigh(r.temp_c, L.temp_warn_c, L.temp_stop_c); if (l !== "good") { level = l; word = LEVEL_WORD[l]; } } break;
+        case "rate": detail = r._rateOk ? `${r.temp_rate_cpm >= 0 ? "+" : ""}${fmt(r.temp_rate_cpm, 2)} °C/min (warn ${L.rate_warn_cpm}, stop ${L.rate_stop_cpm})` : "Measuring (needs about 30 s of readings)"; break;
+        case "vib": detail = learned(r) ? `${fmt(r.vib_mg, 1)} mg (warn ${fmt(r.vib_warn_mg, 0)}, stop ${fmt(r.vib_stop_mg, 0)} mg)` : `${fmt(r.vib_mg, 1)} mg, hard stop at ${NOT_LEARNED} mg until learned`;
+          if (!tripped && !warning && learned(r)) { const l = levelHigh(r.vib_mg, r.vib_warn_mg, r.vib_stop_mg); if (l !== "good") { level = l; word = LEVEL_WORD[l]; } } break;
+        case "stall": detail = running(r.state) ? "Watching for vibration collapsing while powered" : "Active while the motor runs"; break;
+        case "tilt": detail = `${fmt(r.tilt_deg, 1)}° from level (warn ${L.tilt_warn_deg}°, stop ${L.tilt_stop_deg}°)`;
+          if (!tripped && !warning) { const l = levelHigh(r.tilt_deg, L.tilt_warn_deg, L.tilt_stop_deg); if (l !== "good") { level = l; word = LEVEL_WORD[l]; } } break;
+        case "power": detail = running(r.state) ? `Relay on, driver at PWM ${fmt(r.pwm, 0)}/255` : "Relay off, motor unpowered"; break;
+        case "sens": {
+          const bad = [S.sensors.mpu === false && "MPU6050", S.sensors.dht === false && S.sensors.dhtName, !S.i2cOk && "I2C bus"].filter(Boolean);
+          detail = bad.length ? `Not answering: ${bad.join(", ")}` : S.sensors.mpu === null ? "Tested at power-up, then checked on every reading" : `MPU6050, ${S.sensors.dhtName}, HC-SR04 and LCD answering`;
+          if (bad.length && !tripped) { level = "warn"; word = "Check"; }
+          break;
+        }
+      }
+      if (warning) { level = "warn"; word = "Warning"; }
+      if (tripped) { level = "crit"; word = "Tripped"; detail = (REASON_TEXT[r.reason] || r.reason) + ". " + detail; }
+      return `<li data-level="${level}"><i class="ind"></i><span class="name">${c.name}</span><span class="word">${word}</span><span class="detail">${esc(detail)}</span></li>`;
+    });
+    $("checkList").innerHTML = items.join("");
+  }
+
+  function renderStats() {
+    const s = S.st, L = S.limits;
+    const item = (label, value, unit) => `<div><dt>${label}</dt><dd>${value}${unit ? `<small>${unit}</small>` : ""}</dd></div>`;
+    const sessionS = (Date.now() - S.sessionStart) / 1000;
+    $("stats").innerHTML = [
+      item("Motor starts", s.starts), item("Emergency stops", s.estops),
+      item("Warnings", s.warnings), item("Faults", s.faults),
+      item("Speed changes", s.speedChanges), item("Readings logged", s.samples.toLocaleString()),
+      item("Running time", dur(s.runS)), item("Time in warning", dur(s.warnS)),
+      item("Peak temperature", fmt(s.peakTemp, 1), "°C"), item("Peak vibration", fmt(s.peakVib, 1), "mg"),
+      item("Closest approach", ok(s.minDist) ? fmt(s.minDist, 0) : "none", ok(s.minDist) ? "cm" : ""), item("Session length", dur(sessionS))
+    ].join("");
+    $("sessionSince").textContent = "since " + new Date(S.sessionStart).toLocaleString([], { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short", hour12: false });
+  }
+
+  function renderHealth() {
+    const r = S.rows[S.rows.length - 1];
+    let recent = 0;
+    if (r) { for (let i = S.rows.length - 1; i >= 0 && S.rows[i].t > r.t - 10000; i--) recent++; recent /= 10; }
+    const age = S.lastArrival ? (Date.now() - S.lastArrival) / 1000 : NaN;
+    const sensor = (v, okText) => v === false ? ["crit", "Not answering"] : v === true ? ["good", okText || "OK"] : ["none", "Waiting for self-test"];
+    const rows = [];
+    const add = (level, name, value, detail) => rows.push(`<li data-level="${level}"><i class="ind"></i><span class="name">${name}</span><span class="val2">${esc(value)}</span>${detail ? `<span class="detail">${esc(detail)}</span>` : ""}</li>`);
+    if (S.mode === "server") add(S.link.connected ? "good" : "crit", "Arduino link", S.link.connected ? (S.link.port === "demo" ? "Demo" : `${S.link.port}, 9600 baud`) : "Offline", !S.link.connected ? S.link.message : S.link.port === "demo" ? "Pretend machine running on the lab PC server" : "Lab PC server reads the USB port");
+    else if (S.mode === "usb") add("good", "Arduino link", "USB, 9600 baud", "Connected straight to this browser");
+    else if (S.mode === "demo") add("good", "Arduino link", "Demo machine", "Pretend data, same format as the Arduino");
+    else add("none", "Arduino link", "Not connected", "");
+    add(r && !stale() ? "good" : r ? "crit" : "none", "Data stream", r ? `${recent.toFixed(1)} readings/s` : "–", ok(age) ? `last reading ${age < 1 ? "just now" : age.toFixed(0) + " s ago"}` : "");
+    if (r) add("good", "Arduino running for", dur(r.ms / 1000), "since its last restart");
+    const [ml, mw] = sensor(S.sensors.mpu); add(ml, "MPU6050", mw, "vibration and tilt, I2C");
+    const [dl, dw] = sensor(S.sensors.dht); add(dl, S.sensors.dhtName, dw, "temperature and humidity");
+    add(r ? "good" : "none", "HC-SR04", r ? (r.dist_cm < DIST_CLEAR ? `${fmt(r.dist_cm, 0)} cm` : "Zone clear") : "–", "ultrasonic distance");
+    const [ll, lw] = S.i2cOk ? sensor(S.sensors.lcd) : ["crit", "Bus jammed"]; add(ll, "LCD 16×2", lw, "I2C display on the machine");
+    add(S.st.wdResets ? "warn" : r ? "good" : "none", "Watchdog restarts", String(S.st.wdResets), "the Arduino restarts itself if its program hangs");
+    if (S.mode === "server" && S.viewers !== null) add("none", "Viewers now", String(S.viewers), "browsers open on this monitor");
+    $("health").innerHTML = rows.join("");
+  }
+
+  let tableTick = 0;
+  function renderTable() {
+    if (!$("rawBox").open || ++tableTick % 2) return;
+    $("tbody").innerHTML = S.rows.slice(-25).reverse().map(r => `<tr><td>${hms(r.t)}</td><td>${esc(STATE_WORD[r.state] || r.state)}</td>
+      <td>${fmt(r.speed_now_pct, 0)}</td><td>${fmt(r.pwm, 0)}</td><td>${fmt(pwmToRpm(r.pwm), 0)}</td><td>${fmt(r.temp_c, 1)}</td><td>${fmt(r.temp_rate_cpm, 2)}</td>
+      <td>${fmt(r.vib_mg, 1)}</td><td>${r.dist_cm >= DIST_CLEAR ? "clear" : fmt(r.dist_cm, 0)}</td><td>${fmt(r.tilt_deg, 1)}</td><td>${fmt(r.humidity_pct, 0)}</td></tr>`).join("");
+  }
+
+  // ===================================================================== event log
+  function addLog(t, text, level) {
+    S.log.push({ t, text, level: level || "info" });
+    if (S.log.length > 400) S.log.shift();
+    logDirty = true; queueLog();
+  }
+  let logDirty = false, logQueued = false;
+  function queueLog() { if (logQueued) return; logQueued = true; requestAnimationFrame(() => { logQueued = false; renderLog(); }); }
+  function renderLog() {
+    if (!logDirty) return; logDirty = false;
+    const list = S.log.filter(e => S.filter === "all" || e.level === "warn" || e.level === "crit").slice(-150).reverse();
+    $("log").innerHTML = list.length
+      ? list.map(e => `<li data-level="${e.level}"><i class="ind" data-level="${e.level === "info" ? "none" : e.level}"></i><time>${hms(e.t)}</time><span>${esc(e.text)}</span></li>`).join("")
+      : `<li class="empty-log">${S.filter === "all" ? "Events such as starts, warnings and emergency stops are listed here." : "No warnings or stops so far."}</li>`;
+  }
+
+  // ===================================================================== parsing
+  function resetSession(start) {
+    S.rows = []; S.log = []; S.st = freshStats(); S.sessionStart = start || Date.now();
+    S.evState = null; S.state = null; S.stateSince = null; S.lastMs = -1; S.lastArrival = 0;
+    S.sensors = { mpu: null, dht: null, dhtName: S.sensors.dhtName, lcd: null }; S.i2cOk = true; S.serial = [];
+    logDirty = true; queueLog(); queueDraw();
+  }
+
+  function ingest(t, line) {
+    line = String(line).replace(/\r/g, "").trim(); if (!line) return;
+    addSerial(t, line);
+    const f = line.split(",");
+    switch (f[0]) {
+      case "H": if (f.length > 6) S.cols = f.slice(1); return;
+      case "L": for (const kv of f.slice(1)) { const [k, v] = kv.split("="); if (k && v !== undefined && ok(num(v))) S.limits[k] = num(v); } return;
+      case "D": onRow(t, f.slice(1)); return;
+      case "E": onEvent(t, f[2], f.slice(3)); return;
+    }
+    if (line.startsWith(">> SELFTEST,") || line.startsWith(">> WATCHDOG_RESET")) { const g = line.slice(3).split(","); onEvent(t, g[0], g.slice(1)); }
+    else if (line.startsWith("# Sensors")) {
+      const m = line.match(/MPU6050 (\w+)/), d = line.match(/(DHT\d+) (\w+)/), l = line.match(/LCD ([\w ]+?)(,|$)/);
+      if (m) S.sensors.mpu = m[1] === "OK";
+      if (d) { S.sensors.dhtName = d[1]; S.sensors.dht = d[2] === "OK"; $("dhtName").textContent = d[1]; }
+      if (l) S.sensors.lcd = l[1].trim() === "OK";
+      queueDraw();
+    }
+  }
+
+  function onRow(t, vals) {
+    if (vals.length < 10) return;
+    const r = { t };
+    S.cols.forEach((n, i) => { r[n] = (n === "state" || n === "reason") ? vals[i] : num(vals[i]); });
+    if (!ok(r.speed_now_pct)) r.speed_now_pct = r.pwm > PWM_MIN ? (r.pwm - PWM_MIN) * 100 / (255 - PWM_MIN) : 0;
+    if (!ok(r.pwm)) r.pwm = pctToPwm(r.speed_now_pct);
+    if (S.lastMs >= 0 && r.ms < S.lastMs - 2000) { addLog(t, "The Arduino restarted.", "warn"); S.evState = null; }
+    S.lastMs = r.ms;
+    const prev = S.rows[S.rows.length - 1];
+    const dt = prev ? Math.min(t - prev.t, 2000) / 1000 : 0;
+    if (running(r.state)) S.st.runS += dt;
+    if (r.state === "WARNING") S.st.warnS += dt;
+    S.st.samples++;
+    if (ok(r.temp_c)) S.st.peakTemp = ok(S.st.peakTemp) ? Math.max(S.st.peakTemp, r.temp_c) : r.temp_c;
+    if (ok(r.vib_mg)) S.st.peakVib = ok(S.st.peakVib) ? Math.max(S.st.peakVib, r.vib_mg) : r.vib_mg;
+    if (r.dist_cm < DIST_CLEAR) S.st.minDist = ok(S.st.minDist) ? Math.min(S.st.minDist, r.dist_cm) : r.dist_cm;
+    if (S.state !== r.state) { S.state = r.state; if (!S.stateSince || !prev || prev.state !== r.state) S.stateSince = t; }
+    r._rateOk = !(r.temp_rate_cpm === 0 && S.rows.length < 16);
+    S.rows.push(r); if (S.rows.length > MAX_ROWS) S.rows.splice(0, S.rows.length - MAX_ROWS);
+    S.lastArrival = Date.now();
+    queueDraw();
+  }
+
+  function onEvent(t, type, rest) {
+    const arg = rest.join(",");
+    if (type === "STATE") {
+      const st = rest[0], why = REASON_TEXT[rest[1]] || rest[1];
+      if (st === "RUN" && S.evState !== "WARNING") S.st.starts++;
+      if (st === "WARNING") S.st.warnings++;
+      if (st === "ESTOP") S.st.estops++;
+      if (st === "FAULT") S.st.faults++;
+      S.evState = st; S.state = st; S.stateSince = t;
+      if (st === "IDLE") addLog(t, "Ready. Motor stopped.", "info");
+      else if (st === "RUN") addLog(t, "Motor running.", "good");
+      else if (st === "WARNING") addLog(t, `Warning: ${why}. Motor slowed down.`, "warn");
+      else if (st === "ESTOP") addLog(t, `Emergency stop: ${why}.`, "crit");
+      else if (st === "FAULT") addLog(t, `Fault: ${why}.`, "crit");
+    } else if (type === "SPEED") { S.st.speedChanges++; addLog(t, `Speed set point changed to ${rest[0]} %.`, "info"); }
+    else if (type === "BASELINE") {
+      const kv = {}; arg.split(" ").forEach(s => { const [k, v] = s.split("="); kv[k] = v; });
+      addLog(t, `Learned normal vibration at ${kv.speed_pct} %: ${kv.vib_base_mg} mg (warn ${kv.vib_warn}, stop ${kv.vib_stop} mg).`, "good");
+    }
+    else if (type === "RELEARN") addLog(t, "Learned vibration cleared; it will be learned again.", "info");
+    else if (type === "TILT_REZERO") addLog(t, "Tilt re-zeroed: this position is now level.", "info");
+    else if (type === "SELFTEST") {
+      S.sensors.mpu = /MPU6050=OK/.test(arg);
+      const d = arg.match(/(DHT\d*)=(\w+)/);
+      if (d) { S.sensors.dht = d[2] === "OK"; if (d[1] !== "DHT") { S.sensors.dhtName = d[1]; $("dhtName").textContent = d[1]; } }
+      S.sensors.lcd = /LCD=OK/.test(arg);
+      const bad = /MISSING|not found/.test(arg);
+      addLog(t, `Power-up self-test: ${arg.replace(/=/g, " ").replace(/ (INA219|12V_SENSE) not fitted/g, "")}.`, bad ? "crit" : "good");
+    }
+    else if (type === "WATCHDOG_RESET") { S.st.wdResets++; addLog(t, "The Arduino was restarted by its watchdog.", "warn"); }
+    else if (type === "I2C_BUS_ERROR") { S.i2cOk = false; S.st.i2cErr++; addLog(t, "I2C wires (A4/A5) not responding: check the LCD and MPU6050 wiring.", "crit"); }
+    else if (type === "I2C_BUS_OK") { S.i2cOk = true; addLog(t, "I2C wires working again.", "good"); }
+    queueDraw();
+  }
+
+  function addSerial(t, line) {
+    S.serial.push(line); if (S.serial.length > 400) S.serial.shift();
+    serialDirty = true;
+  }
+  let serialDirty = false;
+  setInterval(() => {
+    if (!serialDirty || !$("rawBox").open) return; serialDirty = false;
+    const el = $("serial"), atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+    el.textContent = S.serial.join("\n"); if (atBottom) el.scrollTop = el.scrollHeight;
+  }, 400);
+  $("rawBox").addEventListener("toggle", () => { serialDirty = true; tableTick = 1; queueDraw(); });
+
+  // ================================================================= connections
+  function setConn(s, text) { $("connPill").dataset.s = s; $("connText").textContent = text; }
+  function setRole() {
+    $("role").textContent = S.mode === "server" ? (S.canControl ? "Lab PC, full control" : "View only") : S.mode === "usb" ? "USB, full control" : S.mode === "demo" ? "Demo" : "";
+  }
+  function commandName(c) { return /^\d+$/.test(c) ? `speed ${c} %` : CMD_TEXT[c] || c; }
+
+  async function send(cmd) {
+    cmd = String(cmd).trim().toLowerCase(); if (!cmd) return;
+    if (S.mode === "server") {
+      try {
+        const res = await fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cmd }) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) addLog(Date.now(), `Not sent (${commandName(cmd)}): ${j.error || res.status}.`, "warn");
+      } catch (e) { addLog(Date.now(), `Not sent (${commandName(cmd)}): the server is not reachable.`, "crit"); }
+      return;
+    }
+    if (S.mode === "demo") { addLog(Date.now(), `This computer sent: ${commandName(cmd)}.`, cmd === "x" ? "crit" : "info"); demo.command(cmd); return; }
+    if (S.mode === "usb" && port && port.writable) {
+      try { const w = port.writable.getWriter(); await w.write(new TextEncoder().encode(cmd + "\n")); w.releaseLock(); if (cmd !== "d") addLog(Date.now(), `This computer sent: ${commandName(cmd)}.`, cmd === "x" ? "crit" : "info"); }
+      catch (e) { addLog(Date.now(), "Could not send: " + e.message, "crit"); }
+      return;
+    }
+    addLog(Date.now(), "Not connected to the machine.", "warn");
+  }
+
+  // ---------------------------------------------------------------- server (SSE)
+  let es = null;
+  function startServer(info) {
+    S.mode = "server"; S.canControl = !!info.can_control;
+    let saved = null; try { saved = localStorage.getItem("msm-rated-rpm"); } catch (_) {}
+    if (info.rated_rpm && !saved) { S.ratedRpm = info.rated_rpm; rpmSubDefault(); }
+    $("logo").src = "/logo"; $("logo").hidden = false;
+    setRole(); setConn("off", "Connecting…");
+    es = new EventSource("/api/stream");
+    es.addEventListener("hello", e => {
+      const h = JSON.parse(e.data);
+      resetSession(h.started);
+      S.canControl = !!h.can_control; S.link = h.status; S.viewers = h.viewers;
+      S.st.samples += h.evicted.rows; S.st.runS += h.evicted.run_s; S.st.warnS += h.evicted.warn_s;
+      const p = h.peaks || {};
+      if (p.temp_c != null) S.st.peakTemp = p.temp_c;
+      if (p.vib_mg != null) S.st.peakVib = p.vib_mg;
+      if (p.dist_cm != null) S.st.minDist = p.dist_cm;
+      setRole(); updateLinkPill();
+    });
+    es.onmessage = e => { const m = JSON.parse(e.data); ingest(m.t, m.l); };
+    es.addEventListener("status", e => {
+      const was = S.link.connected; S.link = JSON.parse(e.data); updateLinkPill();
+      if (was !== S.link.connected) addLog(Date.now(), S.link.message, S.link.connected ? "good" : "crit");
+      queueDraw();
+    });
+    es.addEventListener("cmd", e => {
+      const c = JSON.parse(e.data);
+      const who = c.who === "lab PC" ? "Lab PC" : c.who.replace(/^viewer/, "Viewer");
+      addLog(c.t, `${who} sent: ${commandName(c.cmd)}.`, c.cmd === "x" ? "crit" : "info");
+    });
+    es.addEventListener("viewers", e => { S.viewers = +e.data; });
+    es.addEventListener("ready", () => queueDraw());
+    es.onerror = () => { setConn("off", "Server offline, retrying…"); S.link = { connected: false, port: null, message: "The monitor server on the lab PC is not reachable. Is server.py still running?" }; queueDraw(); };
+  }
+  function updateLinkPill() {
+    if (!S.link.connected) setConn("off", "Arduino offline");
+    else if (S.link.port === "demo") setConn("demo", "Live demo");
+    else setConn("live", `Live on ${S.link.port}`);
+  }
+
+  // ---------------------------------------------------------------- USB (Web Serial)
+  let port = null, reader = null, askTimer = null;
+  async function connectUsb() {
+    if (!("serial" in navigator)) { $("noSerial").hidden = false; return; }
+    try { port = await navigator.serial.requestPort(); await port.open({ baudRate: 9600 }); }
+    catch (e) { port = null; if (e.name !== "NotFoundError") addLog(Date.now(), "Could not open the port: " + e.message + " (close the Arduino IDE Serial Monitor first).", "crit"); return; }
+    stopDemo(); resetSession(); S.mode = "usb"; S.canControl = true; setRole(); setConn("live", "Live over USB");
+    $("btnUsbOff").hidden = false; $("btnUsb").hidden = true;
+    addLog(Date.now(), "Connected over USB. The Arduino restarts when the port opens; readings follow in a few seconds.", "info");
+    let tries = 0;
+    askTimer = setInterval(() => {
+      if (!port || ++tries > 20) { clearInterval(askTimer); return; }
+      if (!S.lastArrival || Date.now() - S.lastArrival > 4000) send("d");
+    }, 2500);
+    readUsb();
+  }
+  async function readUsb() {
+    const dec = new TextDecoder(); let buf = "";
+    try {
+      reader = port.readable.getReader();
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i; while ((i = buf.indexOf("\n")) >= 0) { ingest(Date.now(), buf.slice(0, i)); buf = buf.slice(i + 1); }
+        if (buf.length > 4000) buf = "";
+      }
+    } catch (e) { addLog(Date.now(), "USB connection lost: " + e.message, "crit"); }
+    finally {
+      try { reader && reader.releaseLock(); } catch (_) {}
+      reader = null; clearInterval(askTimer);
+      if (port) { try { await port.close(); } catch (_) {} port = null; }
+      if (S.mode === "usb") { S.mode = "none"; S.canControl = false; setRole(); setConn("off", "Not connected"); $("btnUsbOff").hidden = true; $("btnUsb").hidden = false; queueDraw(); }
+    }
+  }
+  async function disconnectUsb() {
+    if (S.mode === "demo") { stopDemo(); return; }
+    clearInterval(askTimer);
+    if (port && port.writable) { try { const w = port.writable.getWriter(); await w.write(new TextEncoder().encode("n\n")); w.releaseLock(); } catch (_) {} }
+    if (reader) { try { await reader.cancel(); } catch (_) {} }
+  }
+
+  // ---------------------------------------------------------------- demo machine
+  // A pretend machine that prints exactly what the real firmware prints in data mode.
+  let demo = null;
+  function startDemo() {
+    stopDemo(); resetSession(); S.mode = "demo"; S.canControl = true; setRole(); setConn("demo", "Demo machine");
+    $("btnUsbOff").hidden = false; $("btnUsbOff").textContent = "Stop demo"; $("btnUsb").hidden = true; $("btnDemo").hidden = true;
+    let ms = 1200, state = "IDLE", reason = "OK", speed = 60, pwm = 0, temp = 27.4, dist = 150, tilt = 0.4, learnT = 0, clearT = 0;
+    const learnedAt = {}, temps = [];
+    const out = l => ingest(Date.now(), l);
+    const nowPct = () => pwm > PWM_MIN ? Math.round((pwm - PWM_MIN) * 100 / (255 - PWM_MIN)) : 0;
+    const setState = (s, r) => { state = s; reason = r; out(`E,${ms},STATE,${s},${r}`); };
+    out("E,1205,SELFTEST,MPU6050=OK DHT22=OK INA219=not fitted 12V_SENSE=not fitted LCD=OK");
+    out("H," + DEFAULT_COLS.join(","));
+    out("L,dist_warn_cm=40,dist_stop_cm=15,temp_warn_c=40,temp_stop_c=50,rate_warn_cpm=6,rate_stop_cpm=15,tilt_warn_deg=10,tilt_stop_deg=25");
+    setState("IDLE", "OK");
+    const tick = () => {
+      ms += 500;
+      const run = state === "RUN" || state === "WARNING";
+      const target = run ? Math.round(pctToPwm(state === "WARNING" ? Math.min(speed, 45) : speed)) : 0;
+      pwm += Math.sign(target - pwm) * Math.min(Math.abs(target - pwm), 120);
+      const cyc = (ms / 1000) % 50;
+      dist = cyc > 36 && cyc < 40 ? 26 + Math.random() * 6 : 150;
+      if (run) {
+        if (dist < 40 && state === "RUN") { setState("WARNING", "PROX"); clearT = 0; }
+        if (dist >= 45 && state === "WARNING") { clearT += 500; if (clearT >= 3000) setState("RUN", "OK"); }
+      }
+      const pct = nowPct(), base = 9 + 28 * pct / 100;
+      const vib = (pwm > 0 ? base + 1.8 * Math.sin(ms / 1700) : 3.5) + (Math.random() - 0.5) * 4;
+      temp += ((run ? 27 + 9 * pct / 100 : 27) - temp) * 0.0017 + (Math.random() - 0.5) * 0.03;
+      temps.push(temp); if (temps.length > 60) temps.shift();
+      const rate = temps.length > 20 ? (temps[temps.length - 1] - temps[0]) / (temps.length * 0.5 / 60) : 0;
+      let warn = NOT_LEARNED, stop = NOT_LEARNED;
+      if (run && learnedAt[speed]) { const b = learnedAt[speed]; warn = Math.max(40, b * 2); stop = Math.max(warn * 1.5, b * 3.5); }
+      if (state === "RUN" && !learnedAt[speed] && pwm === target) {
+        learnT += 500;
+        if (learnT >= 6000) { learnedAt[speed] = base; learnT = 0; const w = Math.max(40, base * 2);
+          out(`E,${ms},BASELINE,speed_pct=${speed} vib_base_mg=${base.toFixed(1)} vib_warn=${w.toFixed(0)} vib_stop=${Math.max(w * 1.5, base * 3.5).toFixed(0)}`); }
+      } else if (state !== "RUN") learnT = 0;
+      out(`D,${ms},${state},${state === "IDLE" || state === "RUN" ? "OK" : reason},${dist.toFixed(1)},${temp.toFixed(2)},${rate.toFixed(2)},${vib.toFixed(1)},${tilt.toFixed(1)},0,0.00,0.00,${pwm},${warn.toFixed(0)},${stop.toFixed(0)},1500,1500,${(51 + Math.sin(ms / 60000) * 2).toFixed(1)},${speed},${pct}`);
+    };
+    const timer = setInterval(tick, 500);
+    const script = [setTimeout(() => api.command("g"), 3000), setTimeout(() => api.command("100"), 35000), setTimeout(() => api.command("60"), 75000)];
+    const api = {
+      command(c) {
+        c = c.toLowerCase();
+        if (/^\d+$/.test(c)) { speed = Math.max(10, Math.min(100, Math.round(+c / 10) * 10)); out(`E,${ms},SPEED,${speed}`); return; }
+        if (c === "g") { if (state === "IDLE") setState("RUN", "OK"); else if (state === "ESTOP" || state === "FAULT") setState("IDLE", "OK"); }
+        if (c === "x" && state !== "ESTOP") setState("ESTOP", "REMOTE");
+        if (c === "+" || c === "-") { speed = Math.max(10, Math.min(100, speed + (c === "+" ? 10 : -10))); out(`E,${ms},SPEED,${speed}`); }
+        if (c === "l") { for (const k in learnedAt) delete learnedAt[k]; out(`E,${ms},RELEARN`); }
+        if (c === "z") { tilt = 0; out(`E,${ms},TILT_REZERO`); }
+        if (c === "s") out(`# State      : ${state} - ${reason}`);
+      },
+      stop() { clearInterval(timer); script.forEach(clearTimeout); }
+    };
+    demo = api;
+  }
+  function stopDemo() {
+    if (!demo) return;
+    demo.stop(); demo = null;
+    if (S.mode === "demo") { S.mode = "none"; S.canControl = false; setRole(); setConn("off", "Not connected"); }
+    $("btnUsbOff").hidden = true; $("btnUsbOff").textContent = "Disconnect"; $("btnUsb").hidden = false; $("btnDemo").hidden = false;
+    queueDraw();
+  }
+
+  // ===================================================================== controls
+  let dragging = false;
+  const speedIn = $("speed");
+  speedIn.addEventListener("input", () => { dragging = true; $("speedOut").textContent = speedIn.value + " %"; });
+  speedIn.addEventListener("change", () => { dragging = false; send(speedIn.value); });
+  $("btnSlower").addEventListener("click", () => { const v = Math.max(10, +speedIn.value - 10); speedIn.value = v; $("speedOut").textContent = v + " %"; send(String(v)); });
+  $("btnFaster").addEventListener("click", () => { const v = Math.min(100, +speedIn.value + 10); speedIn.value = v; $("speedOut").textContent = v + " %"; send(String(v)); });
+  document.querySelectorAll("[data-speed]").forEach(b => b.addEventListener("click", () => {
+    speedIn.value = b.dataset.speed; $("speedOut").textContent = b.dataset.speed + " %"; send(b.dataset.speed);
+  }));
+  $("btnStart").addEventListener("click", () => send("g"));
+  $("btnEstop").addEventListener("click", () => send("x"));
+  $("btnZero").addEventListener("click", () => send("z"));
+  $("btnLearn").addEventListener("click", () => send("l"));
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && S.mode !== "none") { e.preventDefault(); send("x"); } });
+  $("btnSend").addEventListener("click", () => { send($("cmd").value); $("cmd").value = ""; });
+  $("cmd").addEventListener("keydown", e => { if (e.key === "Enter") { send($("cmd").value); $("cmd").value = ""; } });
+  $("btnUsb").addEventListener("click", connectUsb);
+  $("btnUsbOff").addEventListener("click", disconnectUsb);
+  $("btnDemo").addEventListener("click", startDemo);
+  document.querySelectorAll("[data-win]").forEach(b => b.addEventListener("click", () => {
+    S.win = +b.dataset.win * 1000;
+    document.querySelectorAll("[data-win]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    queueDraw();
+  }));
+  document.querySelectorAll("[data-filter]").forEach(b => b.addEventListener("click", () => {
+    S.filter = b.dataset.filter;
+    document.querySelectorAll("[data-filter]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    logDirty = true; renderLog();
+  }));
+  $("btnCsv").addEventListener("click", () => {
+    if (S.mode === "server") { location.href = "/api/csv"; return; }
+    if (!S.rows.length) { addLog(Date.now(), "No readings to download yet.", "warn"); return; }
+    const head = ["time", ...S.cols].join(",");
+    const body = S.rows.map(r => [new Date(r.t).toISOString(), ...S.cols.map(c => r[c])].join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([head + "\n" + body], { type: "text/csv" }));
+    a.download = "machine_safety_readings.csv"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
+  // theme
+  function applyThemeLabel() { $("btnTheme").textContent = document.documentElement.dataset.theme === "light" ? "Night mode" : "Day mode"; }
+  $("btnTheme").addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("msm-theme", next); } catch (_) {}
+    applyThemeLabel(); queueDraw();
+  });
+  applyThemeLabel();
+
+  // clock + durations
+  function tickClock() {
+    const d = new Date();
+    $("clkTime").textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    $("clkDate").textContent = d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  }
+  tickClock();
+  setInterval(() => { tickClock(); renderState(); renderStats(); renderHealth(); renderControls(); }, 1000);
+
+  // ===================================================================== start-up
+  rpmSubDefault();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => queueDraw());
+  async function boot() {
+    if (location.protocol.startsWith("http")) {
+      try {
+        const res = await fetch("/api/info", { cache: "no-store" });
+        if (res.ok) { const info = await res.json(); if (info && info.version) { startServer(info); render(); return; } }
+      } catch (_) {}
+    }
+    $("connectBar").hidden = false;
+    if (!("serial" in navigator)) { $("noSerial").hidden = false; $("btnUsb").disabled = true; }
+    else navigator.serial.addEventListener("disconnect", () => addLog(Date.now(), "The Arduino's USB cable was unplugged.", "crit"));
+    if (/[?&]demo\b/.test(location.search)) startDemo();
+    render();
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
