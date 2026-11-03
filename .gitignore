@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# Session logs written by web/server.py
+web/data/
+
+# Arduino build output
+build/
+*.hex
+*.elf
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
